@@ -41,12 +41,63 @@ extractGates = function(x) {
            list(populationName=populationName, gateType=gateType,gateValues=NA)
          },
          RectangleGate={
-           #done below
-         },
-         PolygonGate={
-           print(paste("found PolygonGate"))
+           dimIdxs=grep('dimension',names(x[['Gate']][[1]]))
+           gateNames = rep(NA,length(dimIdxs))
+           gateValues = rep(list(),length(dimIdxs))
+           gnIdx=1
+           dimIdx=1
+           for(dimIdx in dimIdxs){
+             gateNames[gnIdx] = as.character(
+               xmlAttrs(
+                 x[['Gate']][[gateType]][[dimIdx]][['fcs-dimension']]
+               )
+             )
+             gateAttrsNames = names(xmlAttrs(x[['Gate']][[gateType]][[dimIdx]]))
+             tmpValues = rep(NA,length(gateAttrsNames))
+             atIdx=1
+             for(attr in gateAttrsNames){
+               tmpValues[atIdx]=as.numeric(as.character(xmlAttrs(x[['Gate']][[gateType]][[dimIdx]])[[attr]]))
+               atIdx=atIdx+1
+             }
+             names(tmpValues)=gateAttrsNames
+             gateValues[gnIdx] = list(tmpValues)
+             gnIdx=gnIdx+1
+           }
+           names(gateValues)=gateNames
+           
+           return(list(populationName=populationName, gateType=gateType,gateValues=gateValues))
            
          },
+         PolygonGate={
+           # get the positions of the dimension names from the first gate object. We assume that there can only be one.
+           dimIdxs=grep('dimension',names(x[['Gate']][[1]]))
+           gateNames = rep(NA,length(dimIdxs))
+           gateValues = rep(list(),length(dimIdxs))
+           gnIdx=1
+           dimIdx=1
+           # get the fcs dimension names
+           for(dimIdx in dimIdxs){
+             gateNames[gnIdx] = as.character(
+               xmlAttrs(
+                 x[['Gate']][[gateType]][[dimIdx]][['fcs-dimension']]
+               )
+             )
+             gnIdx=gnIdx+1
+           }
+           # A Polygon gate has many gating:vertices entries with two values for each of the dimensions previously defined.
+           # get the indices in the x object (again we assume that there is only one gate)
+           vertices=grep('vertex',names(x[['Gate']][[1]]))
+           vIdx=3
+           gateVertices = matrix(ncol=2,nrow=length(vertices))
+           count=1
+           for(vIdx in vertices){
+             gateVertices[count,1]=as.numeric(as.character(xmlAttrs(x[['Gate']][[gateType]][[vIdx]][[1]])[[1]]))
+             gateVertices[count,2]=as.numeric(as.character(xmlAttrs(x[['Gate']][[gateType]][[vIdx]][[2]])[[1]]))
+             count=count+1
+           }
+           colnames(gateVertices)=gateNames
+           return(list(populationName=populationName, gateType=gateType,gateValues=gateVertices))
+           },
          {
            print(paste("not found gate type: ",gateType))
            return(NA)
@@ -54,44 +105,23 @@ extractGates = function(x) {
   )
   #print(gateType)
   #assign("globalIdx", globalIdx+1, envir = .GlobalEnv)
-  dimIdxs=grep('dimension',names(x[['Gate']][[1]]))
-  gateNames = rep(NA,length(dimIdxs))
-  gateValues = rep(list(),length(dimIdxs))
-  gnIdx=1
-  dimIdx=1
-  for(dimIdx in dimIdxs){
-    gateNames[gnIdx] = as.character(
-      xmlAttrs(
-        x[['Gate']][[gateType]][[dimIdx]][['fcs-dimension']]
-      )
-    )
-    gateAttrsNames = names(xmlAttrs(x[['Gate']][[gateType]][[dimIdx]]))
-    tmpValues = rep(NA,length(gateAttrsNames))
-    atIdx=1
-    for(attr in gateAttrsNames){
-      tmpValues[atIdx]=as.numeric(as.character(xmlAttrs(x[['Gate']][[gateType]][[dimIdx]])[[attr]]))
-      atIdx=atIdx+1
-    }
-    names(tmpValues)=gateAttrsNames
-    gateValues[gnIdx] = list(tmpValues)
-    gnIdx=gnIdx+1
+  return(NA)
   }
-  names(gateValues)=gateNames
-  
-  return(list(populationName=populationName, gateType=gateType,gateValues=gateValues))
-}
 
 
 ########################
 ########## readWsp(fileName)
 ########################
-readWsp = function(fileName){
+readWsp = function(fileName, sampleName="001 160518G29a1 SCM WLSM.fcs"){
   data=xmlTreeParse(fileName,useInternalNodes = T)
-  populations = getNodeSet(data,"//Population")
+  populations =getNodeSet(data,paste0("//SampleNode[@name='",sampleName,"']//Population"))
+  #populations = getNodeSet(data,"//Population")
+  #extractGates(x=populations[[1]])
   wspGates = xmlSApply(populations,FUN =extractGates,simplify=T )
   colnames(wspGates)=unlist(wspGates['populationName',])
   return(wspGates)
 }
+
 
 ########################
 ########## xmlEntry2internalGatelist(gating_xml)
@@ -100,29 +130,63 @@ readWsp = function(fileName){
 xmlEntry2internalGatelist = function(gating_xml){
   xmlGateType=names(gating_xml)
   
-  dimIdxs=grep('dimension',names(gating_xml[[xmlGateType]]))
-  gateNames = rep(NA,length(dimIdxs))
-  gateValues = rep(list(),length(dimIdxs))
-  gnIdx=1
-  dimIdx=1
-  for(dimIdx in dimIdxs){
-    gating_xml[[xmlGateType]][[dimIdx]][['fcs-dimension']][['name']]
-    gateNames[gnIdx] = gating_xml[[xmlGateType]][[dimIdx]][['fcs-dimension']][['name']]
-    gateAttrsNames = names(gating_xml[[xmlGateType]][[dimIdx]]$.attrs)
-    tmpValues = rep(NA,length(gateAttrsNames))
-    atIdx=1
-    for(attr in gateAttrsNames){
-      tmpValues[atIdx]=as.numeric(gating_xml[[xmlGateType]][[dimIdx]]$.attrs[[attr]])
-      atIdx=atIdx+1
-    }
-    names(tmpValues)=gateAttrsNames
-    gateValues[gnIdx] = list(tmpValues)
-    gnIdx=gnIdx+1
-  }
-  names(gateValues)=gateNames
-  xmlGate= list(gateType=xmlGateType, 
-                gateValues=gateValues)
-  return(xmlGate)
+  switch(xmlGateType ,
+         RectangleGate={
+           dimIdxs=grep('dimension',names(gating_xml[[xmlGateType]]))
+           gateNames = rep(NA,length(dimIdxs))
+           gateValues = rep(list(),length(dimIdxs))
+           gnIdx=1
+           dimIdx=1
+           for(dimIdx in dimIdxs){
+             gating_xml[[xmlGateType]][[dimIdx]][['fcs-dimension']][['name']]
+             gateNames[gnIdx] = gating_xml[[xmlGateType]][[dimIdx]][['fcs-dimension']][['name']]
+             gateAttrsNames = names(gating_xml[[xmlGateType]][[dimIdx]]$.attrs)
+             tmpValues = rep(NA,length(gateAttrsNames))
+             atIdx=1
+             for(attr in gateAttrsNames){
+               tmpValues[atIdx]=as.numeric(gating_xml[[xmlGateType]][[dimIdx]]$.attrs[[attr]])
+               atIdx=atIdx+1
+             }
+             names(tmpValues)=gateAttrsNames
+             gateValues[gnIdx] = list(tmpValues)
+             gnIdx=gnIdx+1
+           }
+           names(gateValues)=gateNames
+           xmlGate= list(gateType=xmlGateType, 
+                         gateValues=gateValues)
+           return(xmlGate)
+         },
+         PolygonGate={
+           dimIdxs=grep('dimension',names(gating_xml[[xmlGateType]]))
+           gateNames = rep(NA,length(dimIdxs))
+           gateValues = rep(list(),length(dimIdxs))
+           gnIdx=1
+           dimIdx=1
+           for(dimIdx in dimIdxs){
+             gating_xml[[xmlGateType]][[dimIdx]][['fcs-dimension']][['name']]
+             gateNames[gnIdx] = gating_xml[[xmlGateType]][[dimIdx]][['fcs-dimension']][['name']]
+             gnIdx=gnIdx+1
+           }
+           
+           vertices=grep('vertex',names(gating_xml[[xmlGateType]]))
+           vIdx=3
+           gateVertices = matrix(ncol=2,nrow=length(vertices))
+           count=1
+           for(vIdx in vertices){
+             gateVertices[count,1]=as.numeric(as.character(xmlAttrs(x[['Gate']][[gateType]][[vIdx]][[1]])[[1]]))
+             gateVertices[count,2]=as.numeric(as.character(xmlAttrs(x[['Gate']][[gateType]][[vIdx]][[2]])[[1]]))
+             count=count+1
+           }
+           
+           colnames(gateVertices)=gateNames
+           xmlGate = list(gateType=gateType,gateValues=gateVertices)
+           return(xmlGate)
+         },
+         {
+           print(paste("not found gate type: ",gateType))
+           
+         })
+  return(NA)
 }
 
 ########################
@@ -135,27 +199,38 @@ compare2Gates = function(xmlGate, wspGate){
   #print("WspGate")
   #print(wspGate)
   if(xmlGate$gateType != wspGate$gateType){return (FALSE)}
-  if(xmlGate$gateType != "RectangleGate"){return (FALSE)}
+  #if(xmlGate$gateType != "RectangleGate"){return (FALSE)}
   
-  xmlGate$gateValues[1]
-  gateVIdx=1
-  for(gateVIdx in c(1:length(xmlGate$gateValues))){
-    wspValues=wspGate$gateValues[ names(xmlGate$gateValues[gateVIdx])][[1]]
-    if(is.null(wspValues)) {return(FALSE)}
-    xmlValues=xmlGate$gateValues[gateVIdx][[1]]
-    #print("wspValue")
-    #print(wspValues)
-    #print("xmlValues")
-    #print(xmlValues)
-    #print(names(xmlValues[1]))
-    for(thIdx in c(1:length(xmlValues))){
-      if(is.na(wspValues[names(xmlValues[thIdx])])){return(FALSE)}
-      if(wspValues[names(xmlValues[thIdx])] != xmlValues[thIdx]){
-        return(FALSE)
+  #xmlGate$gateValues[1]
+  if(xmlGate$gateType =="RectangleGate"){
+    gateVIdx=1
+    for(gateVIdx in c(1:length(xmlGate$gateValues))){
+      wspValues=wspGate$gateValues[ names(xmlGate$gateValues[gateVIdx])][[1]]
+      if(is.null(wspValues)) {return(FALSE)}
+      xmlValues=xmlGate$gateValues[gateVIdx][[1]]
+      #print("wspValue")
+      #print(wspValues)
+      #print("xmlValues")
+      #print(xmlValues)
+      #print(names(xmlValues[1]))
+      for(thIdx in c(1:length(xmlValues))){
+        if(is.na(wspValues[names(xmlValues[thIdx])])){return(FALSE)}
+        if(wspValues[names(xmlValues[thIdx])] != xmlValues[thIdx]){
+          return(FALSE)
+        }
       }
     }
+    return(TRUE)
   }
-  return(TRUE)
+  
+  if(xmlGate$gateType == "PolygonGate"){
+    if(!all(colnames(wspGate$gateValues) == colnames(xmlGate$gateValues))){return(FALSE)}
+    if (all(wspGate$gateValues[,1] == xmlGate$gateValues[,1]) & all(wspGate$gateValues[,2] == xmlGate$gateValues[,2])){
+      return(TRUE)
+    }
+    return(FALSE)
+  }
+  return(FALSE)
 }
 
 ########################
@@ -170,7 +245,7 @@ shiftFunction <- function(x,n){
 ########################
 
 findName = function (xmlGate, wspData){
-  wspIdx=2
+  wspIdx=1
   for (wspIdx in c(1:ncol(wspData))){
     wspGate = wspData[,wspIdx]
     if(compare2Gates(xmlGate=xmlGate, wspGate=wspGate)) {
